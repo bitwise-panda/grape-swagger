@@ -30,13 +30,13 @@ module Grape
     # required keys for SwaggerObject
     def swagger_object(info, target_class, request, options)
       {
-        info:           info,
         swagger:        '2.0',
-        produces:       content_types_for(target_class),
-        authorizations: options[:authorizations],
+        info:           info,
         host:           request.env['HTTP_HOST'] || options[:host],
         basePath:       request.env['SCRIPT_NAME'] || options[:base_path],
-        schemes:        options[:scheme]
+        schemes:        options[:scheme],
+        produces:       content_types_for(target_class),
+        authorizations: options[:authorizations]
       }.delete_if { |_, value| value.blank? }
     end
 
@@ -125,11 +125,15 @@ module Grape
     end
 
     def method_object(route, options)
+      puts route.inspect
       methods = {}
+
+      methods[:summary] = route.route_description if route.route_description.present?
       methods[:description] = description_object(route, options[:markdown])
       methods[:headers] = route.route_headers if route.route_headers
 
       methods[:produces] = produces_object(route, options)
+      methods[:tags] = path_tag_object(route, options)
 
       methods[:parameters] = params_object(route)
       methods[:responses] = response_object(route)
@@ -147,6 +151,35 @@ module Grape
       description = route.route_detail if route.route_detail.present?
       description = markdown.markdown(description).chomp if markdown
       description
+    end
+
+    def tag_object(routes, options)
+      routes.each do |route|
+        next if hidden?(route)
+        
+        item = get_path(route)
+          
+        tag = {}
+        tag[:name] = item.downcase
+        tag[:description] = description_object(route, options[:markdown])
+  
+        @tags << tag
+      end
+    end
+
+    def path_tag_object(route, options)
+      item = get_path(route)
+      tag = []      
+      tag << item
+    end
+
+    def get_path(route)
+      path = route.route_path
+      path.sub!(/\(\.\w+?\)$/, '')
+      path.sub!('(.:format)', '')
+      path.gsub!(/:(\w+)/, '{\1}')
+      
+      item = path.gsub(%r{/{(.+?)}}, '').split('/').last.singularize.underscore.camelize || 'Item'        
     end
 
     def produces_object(route, options)
@@ -313,9 +346,12 @@ module Grape
         name:          name,
         description:   description,
         type:          data_type,
-        required:      required,
-        allowMultiple: is_array
+        required:      required
       }
+
+      if (is_array)
+          parsed_params[:collectionFormat] = "multi"
+      end
 
       if PRIMITIVE_MAPPINGS.key?(data_type)
         parsed_params[:type], parsed_params[:format] = PRIMITIVE_MAPPINGS[data_type]
@@ -323,8 +359,8 @@ module Grape
 
       parsed_params[:items] = @array_items if @array_items.present?
 
-      parsed_params[:defaultValue] = example if example
-      parsed_params[:defaultValue] = default_value if default_value && example.blank?
+      parsed_params[:default] = example if example
+      parsed_params[:default] = default_value if default_value && example.blank?
 
       parsed_params.merge!(enum_or_range_values) if enum_or_range_values
       parsed_params
