@@ -125,7 +125,6 @@ module Grape
     end
 
     def method_object(route, options)
-      puts route.inspect
       methods = {}
 
       methods[:summary] = route.route_description if route.route_description.present?
